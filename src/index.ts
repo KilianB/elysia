@@ -24,7 +24,7 @@ import {
 	mergeCookie,
 	checksum,
 	mergeLifeCycle,
-	filterGlobalHook,
+filterGlobalHook,
 	asGlobal,
 	traceBackMacro,
 	replaceUrlPath,
@@ -38,10 +38,10 @@ import {
 } from './dynamic-handle'
 
 import {
-	isProduction,
+isProduction,
 	ERROR_CODE,
 	ELYSIA_RESPONSE,
-	ValidationError,
+		ValidationError,
 	type ParseError,
 	type NotFoundError,
 	type InternalServerError
@@ -84,7 +84,7 @@ import type {
 	MapResponse,
 	Checksum,
 	MacroManager,
-	BaseMacro,
+BaseMacro,
 	MacroToProperty,
 	TransformHandler
 } from './types'
@@ -193,7 +193,7 @@ export default class Elysia<
 			scoped: false,
 			cookie: {},
 			analytic: false,
-			...config,
+			...(config || {}),
 			seed: config?.seed === undefined ? '' : config?.seed
 		} as any
 
@@ -1318,7 +1318,7 @@ export default class Elysia<
 		) => Elysia<any, any, any, any, any, any, any>
 	): this {
 		const instance = new Elysia({
-			...this.config,
+			...(this.config || {}),
 			prefix: ''
 		})
 		instance.store = this.store
@@ -1332,14 +1332,14 @@ export default class Elysia<
 
 		if (sandbox.event.request.length)
 			this.event.request = [
-				...this.event.request,
-				...(sandbox.event.request as any)
+				...(this.event.request || []),
+				...((sandbox.event.request || []) as any)
 			]
 
 		if (sandbox.event.onResponse.length)
 			this.event.onResponse = [
-				...this.event.onResponse,
-				...(sandbox.event.onResponse as any)
+				...(this.event.onResponse || []),
+				...((sandbox.event.onResponse || []) as any)
 			]
 
 		this.model(sandbox.definitions.type)
@@ -1363,12 +1363,18 @@ export default class Elysia<
 						path,
 						handler,
 						mergeHook(hook, {
-							...localHook,
+							...(localHook || {}),
 							error: !localHook.error
 								? sandbox.event.error
 								: Array.isArray(localHook.error)
-								? [...localHook.error, ...sandbox.event.error]
-								: [localHook.error, ...sandbox.event.error]
+								? [
+										...(localHook.error || {}),
+										...(sandbox.event.error || {})
+								  ]
+								: [
+										localHook.error,
+										...(sandbox.event.error || {})
+								  ]
 						})
 					)
 				} else {
@@ -1487,7 +1493,7 @@ export default class Elysia<
 		}
 
 		const instance = new Elysia<any>({
-			...this.config,
+			...(this.config || {}),
 			prefix: ''
 		})
 		instance.store = this.store
@@ -1498,14 +1504,14 @@ export default class Elysia<
 
 		if (sandbox.event.request.length)
 			this.event.request = [
-				...this.event.request,
-				...sandbox.event.request
+				...(this.event.request || []),
+				...(sandbox.event.request || [])
 			]
 
 		if (sandbox.event.onResponse.length)
 			this.event.onResponse = [
-				...this.event.onResponse,
-				...sandbox.event.onResponse
+				...(this.event.onResponse || []),
+				...(sandbox.event.onResponse || [])
 			]
 
 		this.model(sandbox.definitions.type)
@@ -1517,12 +1523,21 @@ export default class Elysia<
 					path,
 					handler,
 					mergeHook(hook as LocalHook<any, any, any, any, any>, {
-						...(localHook as LocalHook<any, any, any, any, any>),
+						...((localHook || {}) as LocalHook<
+							any,
+							any,
+							any,
+							any,
+							any
+						>),
 						error: !localHook.error
 							? sandbox.event.error
 							: Array.isArray(localHook.error)
-							? [...localHook.error, ...sandbox.event.error]
-							: [localHook.error, ...sandbox.event.error]
+							? [
+									...(localHook.error || {}),
+									...(sandbox.event.error || [])
+							  ]
+							: [localHook.error, ...(sandbox.event.error || [])]
 					})
 				)
 			}
@@ -1885,32 +1900,62 @@ export default class Elysia<
 
 			plugin.model(this.definitions.type as any)
 			plugin.error(this.definitions.error as any)
-			plugin.macros = [...this.macros, ...plugin.macros]
+			plugin.macros = [...(this.macros || []), ...(plugin.macros || [])]
 
 			plugin.onRequest((context) => {
 				Object.assign(context, this.decorators)
 				Object.assign(context.store, this.store)
 			})
 
-			plugin.event.trace = [...this.event.trace, ...plugin.event.trace]
+			plugin.event.trace = [
+				...(this.event.trace || []),
+				...(plugin.event.trace || [])
+			]
 
-			if (plugin.config.aot) plugin.compile()
+			
 
-			if (isScoped && !plugin.config.prefix) {
+			if (isScoped && !plugin.config.prefix)
 				console.warn(
 					'When using scoped plugins it is recommended to use a prefix, else routing may not work correctly for the second scoped instance'
-				)
-			}
+					)
+
+		    /* Run global error handlers after the error handlers of the plugin are done executing.
+			 TODO
+			   - should this really be handled here or is there some kind of merging failing?
+			   - should this also be applicable for other handlers? 
+			 It seems like this only affects scoped changes. so it could be moved inside the below if block */
+			
+			plugin.event.error.push(...this.event.error);
+			
+			if (plugin.config.aot) plugin.compile()
 
 			let instance
 
 			if (isScoped && plugin.config.prefix) {
+			
 				instance = this.mount(plugin.config.prefix + '/', plugin.fetch)
-			} else {
-				instance = this.mount(plugin.fetch)
-			}
 
-			this.routes = this.routes.concat(instance.routes)
+				//Ensure that when using plugins routes are correctly showing up in the .routes property. Else plugins e.g. swagger will not correctly work.
+				//This also avoids adding routes multiple times.
+				
+				plugin.routes.forEach((r) => {
+					this.routes.push({
+						...r,
+						path: `${plugin.config.prefix}${r.path}`,
+						//This probably has no effect as the routes object itself is not used to execute these handlers? The plugin is taking care of it.
+						hooks: mergeHook(
+							r.hooks,
+							{
+								error: this.event.error
+							}
+						)
+					})
+				})
+			} else {
+
+				instance = this.mount(plugin.fetch)
+				this.routes = this.routes.concat(instance.routes)
+			}
 
 			return this
 		} else {
@@ -1930,7 +1975,7 @@ export default class Elysia<
 						({ checksum }) => current === checksum
 					)
 				)
-					this.macros.push(...plugin.macros)
+					this.macros.push(...(plugin.macros || []))
 
 				const macroHashes: string[] = []
 
@@ -3932,7 +3977,7 @@ export default class Elysia<
 
 		if (typeof this.server?.reload === 'function')
 			this.server.reload({
-				...this.server,
+				...(this.server || {}),
 				fetch: this.fetch
 			})
 
@@ -4013,11 +4058,11 @@ export default class Elysia<
 				? ({
 						development: !isProduction,
 						reusePort: true,
-						...this.config.serve,
-						...options,
+						...(this.config.serve || {}),
+						...(options || {}),
 						websocket: {
-							...this.config.websocket,
-							...websocket
+							...(this.config.websocket || {}),
+							...(websocket || {})
 						},
 						fetch,
 						error: this.outerErrorHandler
@@ -4025,10 +4070,10 @@ export default class Elysia<
 				: ({
 						development: !isProduction,
 						reusePort: true,
-						...this.config.serve,
+						...(this.config.serve || {}),
 						websocket: {
-							...this.config.websocket,
-							...websocket
+							...(this.config.websocket || {}),
+							...(websocket || {})
 						},
 						port: options,
 						fetch,
