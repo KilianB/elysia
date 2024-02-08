@@ -171,6 +171,7 @@ var Files = TypeSystem.Type(
   }
 );
 FormatRegistry.Set("numeric", (value) => !!value && !isNaN(+value));
+FormatRegistry.Set("boolean", (value) => value === "true" || value === "false");
 FormatRegistry.Set("ObjectString", (value) => {
   let start = value.charCodeAt(0);
   if (start === 9 || start === 10 || start === 32)
@@ -207,6 +208,27 @@ var ElysiaType = {
       return number;
     }).Encode((value) => value);
   },
+  BooleanString: (property) => {
+    const schema = Type.Boolean(property);
+    return t.Transform(
+      t.Union(
+        [
+          t.String({
+            format: "boolean",
+            default: false
+          }),
+          t.Boolean(property)
+        ],
+        property
+      )
+    ).Decode((value) => {
+      if (typeof value === "string")
+        return value === "true";
+      if (property && !Value3.Check(schema, value))
+        throw new ValidationError("property", schema, value);
+      return value;
+    }).Encode((value) => value);
+  },
   ObjectString: (properties, options) => t.Transform(
     t.Union(
       [
@@ -240,6 +262,7 @@ var ElysiaType = {
   MaybeEmpty: (schema) => t.Union([t.Null(), t.Undefined(), schema]),
   Cookie: (properties, options) => t.Object(properties, options)
 };
+t.BooleanString = ElysiaType.BooleanString;
 t.ObjectString = ElysiaType.ObjectString;
 t.Numeric = ElysiaType.Numeric;
 t.File = (arg = {}) => ElysiaType.File({

@@ -1,5 +1,5 @@
 import * as _sinclair_typebox from '@sinclair/typebox';
-import { TSchema, NumberOptions, SchemaOptions, TNumber, TProperties, ObjectOptions, TObject, TUnion, TNull, TUndefined, Static, TAnySchema } from '@sinclair/typebox';
+import { TSchema, NumberOptions, SchemaOptions, TNumber, TBoolean, TProperties, ObjectOptions, TObject, TUnion, TNull, TUndefined, Static, TAnySchema } from '@sinclair/typebox';
 import { TypeCheck } from '@sinclair/typebox/compiler';
 import { WebSocketHandler, ServerWebSocket, Server, Serve } from 'bun';
 import '@sinclair/typebox/system';
@@ -342,6 +342,7 @@ declare namespace ElysiaTypeOptions {
 }
 declare const ElysiaType: {
     readonly Numeric: (property?: NumberOptions) => TNumber;
+    readonly BooleanString: (property?: SchemaOptions) => TBoolean;
     readonly ObjectString: <T extends TProperties>(properties: T, options?: ObjectOptions) => TObject<T>;
     readonly File: (options?: Partial<ElysiaTypeOptions.File> | undefined) => _sinclair_typebox.TUnsafe<File>;
     readonly Files: (options?: ElysiaTypeOptions.Files) => _sinclair_typebox.TTransform<_sinclair_typebox.TUnsafe<File[]>, File[]>;
@@ -369,6 +370,7 @@ declare const ElysiaType: {
 type TCookie = (typeof ElysiaType)['Cookie'];
 declare module '@sinclair/typebox' {
     interface JavaScriptTypeBuilder {
+        BooleanString: typeof ElysiaType.BooleanString;
         ObjectString: typeof ElysiaType.ObjectString;
         Numeric: typeof ElysiaType.Numeric;
         File: typeof ElysiaType.File;

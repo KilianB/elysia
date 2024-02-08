@@ -3399,6 +3399,7 @@ var Files = import_system.TypeSystem.Type(
   }
 );
 import_typebox2.FormatRegistry.Set("numeric", (value) => !!value && !isNaN(+value));
+import_typebox2.FormatRegistry.Set("boolean", (value) => value === "true" || value === "false");
 import_typebox2.FormatRegistry.Set("ObjectString", (value) => {
   let start = value.charCodeAt(0);
   if (start === 9 || start === 10 || start === 32)
@@ -3435,6 +3436,27 @@ var ElysiaType = {
       return number;
     }).Encode((value) => value);
   },
+  BooleanString: (property) => {
+    const schema = import_typebox2.Type.Boolean(property);
+    return t.Transform(
+      t.Union(
+        [
+          t.String({
+            format: "boolean",
+            default: false
+          }),
+          t.Boolean(property)
+        ],
+        property
+      )
+    ).Decode((value) => {
+      if (typeof value === "string")
+        return value === "true";
+      if (property && !import_value4.Value.Check(schema, value))
+        throw new ValidationError("property", schema, value);
+      return value;
+    }).Encode((value) => value);
+  },
   ObjectString: (properties, options) => t.Transform(
     t.Union(
       [
@@ -3468,6 +3490,7 @@ var ElysiaType = {
   MaybeEmpty: (schema) => t.Union([t.Null(), t.Undefined(), schema]),
   Cookie: (properties, options) => t.Object(properties, options)
 };
+t.BooleanString = ElysiaType.BooleanString;
 t.ObjectString = ElysiaType.ObjectString;
 t.Numeric = ElysiaType.Numeric;
 t.File = (arg = {}) => ElysiaType.File({
@@ -3581,21 +3604,21 @@ var Elysia = class _Elysia {
       const serve = typeof options === "object" ? {
         development: !isProduction,
         reusePort: true,
-        ...this.config.serve,
-        ...options,
+        ...this.config.serve || {},
+        ...options || {},
         websocket: {
-          ...this.config.websocket,
-          ...websocket
+          ...this.config.websocket || {},
+          ...websocket || {}
         },
         fetch,
         error: this.outerErrorHandler
       } : {
         development: !isProduction,
         reusePort: true,
-        ...this.config.serve,
+        ...this.config.serve || {},
         websocket: {
-          ...this.config.websocket,
-          ...websocket
+          ...this.config.websocket || {},
+          ...websocket || {}
         },
         port: options,
         fetch,
@@ -3649,7 +3672,7 @@ var Elysia = class _Elysia {
       scoped: false,
       cookie: {},
       analytic: false,
-      ...config,
+      ...config || {},
       seed: config?.seed === void 0 ? "" : config?.seed
     };
     if (config?.analytic && (config?.name || config?.seed !== void 0))
@@ -4361,7 +4384,7 @@ ${this.staticRouter.map[loosePath].code}`;
    */
   group(prefix, schemaOrRun, run) {
     const instance = new _Elysia({
-      ...this.config,
+      ...this.config || {},
       prefix: ""
     });
     instance.store = this.store;
@@ -4372,13 +4395,13 @@ ${this.staticRouter.map[loosePath].code}`;
     this.decorators = mergeDeep(this.decorators, instance.decorators);
     if (sandbox.event.request.length)
       this.event.request = [
-        ...this.event.request,
-        ...sandbox.event.request
+        ...this.event.request || [],
+        ...sandbox.event.request || []
       ];
     if (sandbox.event.onResponse.length)
       this.event.onResponse = [
-        ...this.event.onResponse,
-        ...sandbox.event.onResponse
+        ...this.event.onResponse || [],
+        ...sandbox.event.onResponse || []
       ];
     this.model(sandbox.definitions.type);
     Object.values(instance.routes).forEach(
@@ -4392,8 +4415,14 @@ ${this.staticRouter.map[loosePath].code}`;
             path,
             handler,
             mergeHook(hook, {
-              ...localHook,
-              error: !localHook.error ? sandbox.event.error : Array.isArray(localHook.error) ? [...localHook.error, ...sandbox.event.error] : [localHook.error, ...sandbox.event.error]
+              ...localHook || {},
+              error: !localHook.error ? sandbox.event.error : Array.isArray(localHook.error) ? [
+                ...localHook.error || {},
+                ...sandbox.event.error || {}
+              ] : [
+                localHook.error,
+                ...sandbox.event.error || {}
+              ]
             })
           );
         } else {
@@ -4449,7 +4478,7 @@ ${this.staticRouter.map[loosePath].code}`;
       return this;
     }
     const instance = new _Elysia({
-      ...this.config,
+      ...this.config || {},
       prefix: ""
     });
     instance.store = this.store;
@@ -4458,13 +4487,13 @@ ${this.staticRouter.map[loosePath].code}`;
     this.decorators = mergeDeep(this.decorators, instance.decorators);
     if (sandbox.event.request.length)
       this.event.request = [
-        ...this.event.request,
-        ...sandbox.event.request
+        ...this.event.request || [],
+        ...sandbox.event.request || []
       ];
     if (sandbox.event.onResponse.length)
       this.event.onResponse = [
-        ...this.event.onResponse,
-        ...sandbox.event.onResponse
+        ...this.event.onResponse || [],
+        ...sandbox.event.onResponse || []
       ];
     this.model(sandbox.definitions.type);
     Object.values(instance.routes).forEach(
@@ -4474,8 +4503,11 @@ ${this.staticRouter.map[loosePath].code}`;
           path,
           handler,
           mergeHook(hook, {
-            ...localHook,
-            error: !localHook.error ? sandbox.event.error : Array.isArray(localHook.error) ? [...localHook.error, ...sandbox.event.error] : [localHook.error, ...sandbox.event.error]
+            ...localHook || {},
+            error: !localHook.error ? sandbox.event.error : Array.isArray(localHook.error) ? [
+              ...localHook.error || {},
+              ...sandbox.event.error || []
+            ] : [localHook.error, ...sandbox.event.error || []]
           })
         );
       }
@@ -4603,26 +4635,42 @@ ${this.staticRouter.map[loosePath].code}`;
       }
       plugin.model(this.definitions.type);
       plugin.error(this.definitions.error);
-      plugin.macros = [...this.macros, ...plugin.macros];
+      plugin.macros = [...this.macros || [], ...plugin.macros || []];
       plugin.onRequest((context) => {
         Object.assign(context, this.decorators);
         Object.assign(context.store, this.store);
       });
-      plugin.event.trace = [...this.event.trace, ...plugin.event.trace];
-      if (plugin.config.aot)
-        plugin.compile();
-      if (isScoped && !plugin.config.prefix) {
+      plugin.event.trace = [
+        ...this.event.trace || [],
+        ...plugin.event.trace || []
+      ];
+      if (isScoped && !plugin.config.prefix)
         console.warn(
           "When using scoped plugins it is recommended to use a prefix, else routing may not work correctly for the second scoped instance"
         );
-      }
+      plugin.event.error.push(...this.event.error);
+      if (plugin.config.aot)
+        plugin.compile();
       let instance;
       if (isScoped && plugin.config.prefix) {
         instance = this.mount(plugin.config.prefix + "/", plugin.fetch);
+        plugin.routes.forEach((r) => {
+          this.routes.push({
+            ...r,
+            path: `${plugin.config.prefix}${r.path}`,
+            //This probably has no effect as the routes object itself is not used to execute these handlers? The plugin is taking care of it.
+            hooks: mergeHook(
+              r.hooks,
+              {
+                error: this.event.error
+              }
+            )
+          });
+        });
       } else {
         instance = this.mount(plugin.fetch);
+        this.routes = this.routes.concat(instance.routes);
       }
-      this.routes = this.routes.concat(instance.routes);
       return this;
     } else {
       plugin.reporter = this.reporter;
@@ -4635,7 +4683,7 @@ ${this.staticRouter.map[loosePath].code}`;
         if (!this.dependencies[name].some(
           ({ checksum: checksum2 }) => current === checksum2
         ))
-          this.macros.push(...plugin.macros);
+          this.macros.push(...plugin.macros || []);
         const macroHashes = [];
         for (let i = 0; i < this.macros.length; i++) {
           const macro = this.macros[i];
@@ -5238,7 +5286,7 @@ ${this.staticRouter.map[loosePath].code}`;
     this.fetch = this.config.aot ? composeGeneralHandler(this) : createDynamicHandler(this);
     if (typeof this.server?.reload === "function")
       this.server.reload({
-        ...this.server,
+        ...this.server || {},
         fetch: this.fetch
       });
     return this;
