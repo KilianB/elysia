@@ -51,7 +51,7 @@
 			"bun": "./dist/handler.js",
 			"import": "./dist/handler.mjs",
 			"require": "./dist/cjs/handler.js",
-			"types": "./dist/handler.d.ts"	
+			"types": "./dist/handler.d.ts"
 		},
 		"./schema": {
 			"bun": "./dist/schema.js",
@@ -126,7 +126,8 @@
 		"eslint": "^8.49.0",
 		"expect-type": "^0.16.0",
 		"tsup": "^8.0.1",
-		"typescript": "5.3.3"
+		"typescript": "5.3.3",
+		"undici-types": "^6.6.2"
 	},
 	"peerDependencies": {
 		"@sinclair/typebox": ">= 0.31.0",

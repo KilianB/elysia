@@ -1,15 +1,15 @@
 import { Kind, TSchema } from '@sinclair/typebox'
-import { Value } from '@sinclair/typebox/value'
 import { TypeCheck, TypeCompiler } from '@sinclair/typebox/compiler'
+import { Value } from '@sinclair/typebox/value'
 
 import { isNotEmpty } from './handler'
 
 import type {
+	BaseMacro,
+	InputSchema,
 	LifeCycleStore,
 	LocalHook,
-	MaybeArray,
-	InputSchema,
-	BaseMacro
+	MaybeArray
 } from './types'
 
 const isObject = (item: any): item is Object =>
@@ -583,4 +583,7 @@ export const traceBackMacro = (
 	}
 }
 
-export const isNumericString = (message: string) => message.trim().length !== 0 && !Number.isNaN(Number(message))
+export const isNumericString = (message: string) =>
+	message.trim().length !== 0 && !Number.isNaN(Number(message))
+
+export const duplicateStream = (stream: ReadableStream): ReadableStream => {}

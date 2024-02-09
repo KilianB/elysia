@@ -1,34 +1,34 @@
 import type { Serve, Server, ServerWebSocket } from 'bun'
 
-import { Memoirist } from 'memoirist'
-import EventEmitter from 'eventemitter3'
 import type { Static, TSchema } from '@sinclair/typebox'
+import EventEmitter from 'eventemitter3'
+import { Memoirist } from 'memoirist'
 
-import { createTraceListener } from './trace'
 import type { Context } from './context'
+import { createTraceListener } from './trace'
 
 import { ElysiaWS, websocket } from './ws'
 import type { WS } from './ws/types'
 
+import {
+	composeErrorHandler,
+	composeGeneralHandler,
+	composeHandler
+} from './compose'
 import { isNotEmpty, mapEarlyResponse } from './handler'
 import {
-	composeHandler,
-	composeGeneralHandler,
-	composeErrorHandler
-} from './compose'
-import {
-	mergeHook,
-	getSchemaValidator,
-	getResponseSchemaValidator,
-	mergeDeep,
-	mergeCookie,
-	checksum,
-	mergeLifeCycle,
-	filterGlobalHook,
 	asGlobal,
-	traceBackMacro,
+	checksum,
+	filterGlobalHook,
+	getResponseSchemaValidator,
+	getSchemaValidator,
+	isNumericString,
+	mergeCookie,
+	mergeDeep,
+	mergeHook,
+	mergeLifeCycle,
 	replaceUrlPath,
-	isNumericString
+	traceBackMacro
 } from './utils'
 
 import {
@@ -38,57 +38,58 @@ import {
 } from './dynamic-handle'
 
 import {
-	isProduction,
-	ERROR_CODE,
 	ELYSIA_RESPONSE,
+	ERROR_CODE,
+	isProduction,
 	ValidationError,
-	type ParseError,
+	type InternalServerError,
 	type NotFoundError,
-	type InternalServerError
+	type ParseError
 } from './error'
 
+import { cloneAndModifyRequest } from './streamUtil'
+import { t } from './type-system'
 import type {
-	ElysiaConfig,
+	AddPrefix,
+	AddPrefixCapitalize,
+	AddSuffix,
+	AddSuffixCapitalize,
+	AfterHandler,
+	BaseMacro,
+	BodyHandler,
+	Checksum,
+	ComposedHandler,
 	DecoratorBase,
 	DefinitionBase,
-	RouteBase,
-	Handler,
-	ComposedHandler,
-	InputSchema,
-	LocalHook,
-	MergeSchema,
-	RouteSchema,
-	UnwrapRoute,
-	InternalRoute,
-	HTTPMethod,
-	SchemaValidator,
-	VoidHandler,
-	PreHandler,
-	BodyHandler,
-	OptionalHandler,
-	AfterHandler,
+	ElysiaConfig,
 	ErrorHandler,
-	LifeCycleStore,
-	MaybePromise,
-	Prettify,
-	ListenCallback,
-	AddPrefix,
-	AddSuffix,
-	AddPrefixCapitalize,
-	AddSuffixCapitalize,
-	TraceReporter,
-	TraceHandler,
-	MaybeArray,
-	GracefulHandler,
 	GetPathParameter,
-	MapResponse,
-	Checksum,
+	GracefulHandler,
+	Handler,
+	HTTPMethod,
+	InputSchema,
+	InternalRoute,
+	LifeCycleStore,
+	ListenCallback,
+	LocalHook,
 	MacroManager,
-	BaseMacro,
 	MacroToProperty,
-	TransformHandler
+	MapResponse,
+	MaybeArray,
+	MaybePromise,
+	MergeSchema,
+	OptionalHandler,
+	PreHandler,
+	Prettify,
+	RouteBase,
+	RouteSchema,
+	SchemaValidator,
+	TraceHandler,
+	TraceReporter,
+	TransformHandler,
+	UnwrapRoute,
+	VoidHandler
 } from './types'
-import { t } from './type-system'
 
 /**
  * ### Elysia Server
@@ -1912,47 +1913,40 @@ export default class Elysia<
 				...(plugin.event.trace || [])
 			]
 
-			
-
 			if (isScoped && !plugin.config.prefix)
 				console.warn(
 					'When using scoped plugins it is recommended to use a prefix, else routing may not work correctly for the second scoped instance'
-					)
+				)
 
-		    /* Run global error handlers after the error handlers of the plugin are done executing.
+			/* Run global error handlers after the error handlers of the plugin are done executing.
 			 TODO
 			   - should this really be handled here or is there some kind of merging failing?
 			   - should this also be applicable for other handlers? 
 			 It seems like this only affects scoped changes. so it could be moved inside the below if block */
-			
-			plugin.event.error.push(...this.event.error);
-			
+
+			plugin.event.error.push(...this.event.error)
+
 			if (plugin.config.aot) plugin.compile()
 
 			let instance
 
 			if (isScoped && plugin.config.prefix) {
-			
 				instance = this.mount(plugin.config.prefix + '/', plugin.fetch)
 
 				//Ensure that when using plugins routes are correctly showing up in the .routes property. Else plugins e.g. swagger will not correctly work.
 				//This also avoids adding routes multiple times.
-				
+
 				plugin.routes.forEach((r) => {
 					this.routes.push({
 						...r,
 						path: `${plugin.config.prefix}${r.path}`,
 						//This probably has no effect as the routes object itself is not used to execute these handlers? The plugin is taking care of it.
-						hooks: mergeHook(
-							r.hooks,
-							{
-								error: this.event.error
-							}
-						)
+						hooks: mergeHook(r.hooks, {
+							error: this.event.error
+						})
 					})
 				})
 			} else {
-
 				instance = this.mount(plugin.fetch)
 				this.routes = this.routes.concat(instance.routes)
 			}
@@ -2170,17 +2164,73 @@ export default class Elysia<
 			return this
 		}
 
+		console.log('Register plugin with path', path)
 		const length = path.length
 
 		if (handle instanceof Elysia) handle = handle.compile().fetch
 
-		const handler: Handler<any, any> = async ({ request, path }) =>
-			(handle as Function)!(
-				new Request(
-					replaceUrlPath(request.url, path.slice(length) || '/'),
-					request
-				)
+		const handler: Handler<any, any> = async ({
+			request,
+			path: incommingPath
+		}: Context) => {
+			// console.log('Body here', await request.json())
+			console.log(
+				'Incomming request inside handler',
+				'Name: ',
+				this.config.name,
+				' Path: ',
+				path,
+				' Incomming path: ',
+				incommingPath
 			)
+
+			// console.log(
+			// 	'Mutate request',
+			// 	'Sliced part to replace',
+			// 	path.slice(length)
+			// )
+			// console.log(
+			// 	'Result',
+			// 	replaceUrlPath(request.url, incommingPath.slice(length) || '/')
+			// )
+
+			// const newReq = request.clone()
+			// newReq.url = replaceUrlPath(
+			// 	request.url,
+			// 	incommingPath.slice(length) || '/'
+			// )
+
+			const rewrittenUrl = replaceUrlPath(
+				request.url,
+				incommingPath.slice(length) || '/'
+			)
+
+			// console.log('Old request to be passed down', request)
+
+			//Here we have a type colission with node/fetch request and bun request. But node types can not be imported at the
+			//moment without breaking other types
+
+			// const spyStream = new ForkStream()
+			// request.body?.pipeThrough(spyStream)
+
+			// if (this.config.name !== 'top_level') {
+			// 	console.log(
+			// 		`[${this.config.name}]`,
+			// 		'Index.ts Values of stream',
+			// 		await request.json()
+			// 	)
+			// }
+
+			// console.log('New request', newReq)
+
+			// console.log(await newReq.json())
+
+			return (handle as Function)!(
+				cloneAndModifyRequest(request, {
+					url: rewrittenUrl
+				})
+			)
+		}
 
 		this.all(
 			path,
@@ -4138,61 +4188,61 @@ export default class Elysia<
 
 export { Elysia }
 
-export { mapResponse, mapCompactResponse, mapEarlyResponse } from './handler'
-export { t } from './type-system'
 export { Cookie, type CookieOptions } from './cookie'
+export { mapCompactResponse, mapEarlyResponse, mapResponse } from './handler'
+export { t } from './type-system'
 
 export {
+	getResponseSchemaValidator,
 	getSchemaValidator,
 	mergeDeep,
 	mergeHook,
-	mergeObjectArray,
-	getResponseSchemaValidator
+	mergeObjectArray
 } from './utils'
 
 export {
 	error,
-	ParseError,
-	NotFoundError,
-	ValidationError,
 	InternalServerError,
-	InvalidCookieSignature
+	InvalidCookieSignature,
+	NotFoundError,
+	ParseError,
+	ValidationError
 } from './error'
 
 export type { Context, PreContext } from './context'
 
 export type {
-	ElysiaConfig,
+	AfterHandler,
+	BodyHandler,
+	Checksum,
+	ComposedHandler,
 	DecoratorBase,
 	DefinitionBase,
-	RouteBase,
-	Handler,
-	ComposedHandler,
-	InputSchema,
-	LocalHook,
-	MergeSchema,
-	RouteSchema,
-	UnwrapRoute,
-	InternalRoute,
-	HTTPMethod,
-	SchemaValidator,
-	VoidHandler,
-	PreHandler,
-	BodyHandler,
-	OptionalHandler,
+	ElysiaConfig,
 	ErrorHandler,
-	AfterHandler,
+	Handler,
+	HTTPMethod,
+	InputSchema,
+	InternalRoute,
 	LifeCycleEvent,
-	TraceEvent,
 	LifeCycleStore,
-	MaybePromise,
 	ListenCallback,
-	UnwrapSchema,
+	LocalHook,
+	MaybePromise,
+	MergeSchema,
+	OptionalHandler,
+	PreHandler,
+	RouteBase,
+	RouteSchema,
+	SchemaValidator,
+	TraceEvent,
 	TraceHandler,
 	TraceProcess,
 	TraceReporter,
 	TraceStream,
-	Checksum
+	UnwrapRoute,
+	UnwrapSchema,
+	VoidHandler
 } from './types'
 
 export type { Static, TSchema } from '@sinclair/typebox'

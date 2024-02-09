@@ -1,15 +1,16 @@
 import type { Elysia } from '.'
 
-import { mapEarlyResponse, mapResponse } from './handler'
 import { ElysiaErrors, NotFoundError, ValidationError } from './error'
+import { mapEarlyResponse, mapResponse } from './handler'
 
 import type { Context } from './context'
 
 import { parse as parseQuery } from 'fast-querystring'
 
-import { signCookie } from './utils'
 import { parseCookie } from './cookie'
+import { signCookie } from './utils'
 
+import { cloneAndModifyRequest } from './streamUtil'
 import type { Handler, LifeCycleStore, SchemaValidator } from './types'
 
 // JIT Handler
@@ -30,6 +31,11 @@ export const createDynamicHandler =
 		}
 
 		let context: Context
+
+		console.log(
+			`[${app.config.name}]`,
+			'Handle request inside dynamic handler'
+		)
 
 		// @ts-ignore
 		if (app.decorators) {
@@ -52,16 +58,45 @@ export const createDynamicHandler =
 			q = url.indexOf('?', s + 1),
 			path = q === -1 ? url.substring(s) : url.substring(s, q)
 
+		// context['path'] = request.url
+		//Fork the stream here again...
+		// context.request.body?.tee()
+
 		try {
 			for (let i = 0; i < app.event.request.length; i++) {
+				const contextTemp = { ...context }
+
+				//Do not reuse the request object or else the stream will already be drained
+				if (context.request.body && request.body) {
+					console.log('Clone request')
+					const [stream1, stream2] = request.body.tee()
+					contextTemp.request = cloneAndModifyRequest(
+						context.request,
+						{ body: stream2 }
+					)
+
+					context.request = cloneAndModifyRequest(context.request, {
+						body: stream1
+					})
+				}
+
 				// @ts-ignore
 				const onRequest = app.event.request[i]
-				let response = onRequest(context as any)
+				let response = onRequest(contextTemp as any)
 				if (response instanceof Promise) response = await response
 
 				response = mapEarlyResponse(response, set)
 				if (response) return response
 			}
+
+			console.log(
+				`[${app.config.name}]`,
+				'PATH',
+				path,
+				'Method',
+				request.method
+			)
+			// console.log('Dynamic routes', app.dynamicRouter)
 
 			const handler =
 				// @ts-ignore
@@ -71,6 +106,8 @@ export const createDynamicHandler =
 
 			if (!handler) throw new NotFoundError()
 
+			// console.log('Selected handler', handler)
+
 			const { handle, hooks, validator, content } = handler.store
 
 			let body: string | Record<string, any> | undefined
@@ -78,7 +115,7 @@ export const createDynamicHandler =
 				if (content) {
 					switch (content) {
 						case 'application/json':
-							body = await request.json() as any
+							body = (await request.json()) as any
 							break
 
 						case 'text/plain':
@@ -125,11 +162,22 @@ export const createDynamicHandler =
 							}
 						}
 
+						// const streamToString = async (stream) => {
+						// 	// lets have a ReadableStream as a stream variable
+						// 	const chunks = []
+
+						// 	for await (const chunk of stream) {
+						// 		chunks.push(Buffer.from(chunk))
+						// 	}
+
+						// 	return Buffer.concat(chunks).toString('utf-8')
+						// }
+
 						// body might be empty string thus can't use !body
 						if (body === undefined) {
 							switch (contentType) {
 								case 'application/json':
-									body = await request.json() as any
+									body = (await request.json()) as any
 									break
 
 								case 'text/plain':
@@ -288,6 +336,23 @@ export const createDynamicHandler =
 				}
 			}
 
+			context['path'] = path
+
+			//This is the nested handler
+
+			// if (
+			// 	app.config.name !== 'top_level' &&
+			// 	app.config.name !== 'first_level'
+			// ) {
+			// 	console.log(
+			// 		`[${app.config.name}]`,
+			// 		'Values of stream',
+			// 		await request.json()
+			// 	)
+			// } else {
+			// 	console.log(`[${app.config.name}]`, 'Values of stream', ' SKIP')
+			// }
+
 			let response = handle(context)
 			if (response instanceof Promise) response = await response
 
@@ -363,6 +428,7 @@ export const createDynamicHandler =
 
 			return mapResponse(response, context.set)
 		} catch (error) {
+			console.log('Catch called', error)
 			if ((error as ElysiaErrors).status)
 				set.status = (error as ElysiaErrors).status
 
